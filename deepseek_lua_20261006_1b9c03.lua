@@ -1,0 +1,890 @@
+-- ================================================================
+-- ESP EGGS Standalone + Botão K
+-- ================================================================
+local Players    = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local RS         = game:GetService("ReplicatedStorage")
+local CoreGui    = game:GetService("CoreGui")
+local UIS        = game:GetService("UserInputService")
+local LP = Players.LocalPlayer
+
+local HUI
+if typeof(gethui) == "function" then
+    local ok, h = pcall(gethui)
+    if ok and typeof(h) == "Instance" then HUI = h end
+end
+HUI = HUI or CoreGui
+
+local rnd = Random.new()
+local function rid()
+    local s = "abcdefghijklmnopqrstuvwxyz0123456789"
+    local t = {}
+    for i = 1, 14 do
+        local n = rnd:NextInteger(1, #s)
+        t[i] = s:sub(n, n)
+    end
+    return table.concat(t)
+end
+
+local function tryReq(f)
+    local ok, m = pcall(function() return require(f()) end)
+    return ok and m or nil
+end
+
+local EggState   = tryReq(function() return RS.Client.EggState end)
+local Assets     = tryReq(function() return RS.Data.Assets end)
+local Mutations  = tryReq(function() return RS.Shared.Modules.Mutations end)
+local EggRecords = tryReq(function() return RS.Shared.Util.EggRecords end)
+
+local function isSecret(r)
+    return string.upper(tostring(r or "")) == "SECRET"
+end
+
+local MutPalettes = {}
+
+local function colorSeq(...)
+    local kp = {}
+    for i, v in ipairs({...}) do kp[i] = ColorSequenceKeypoint.new(v[1], v[2]) end
+    return ColorSequence.new(kp)
+end
+
+local function paletteFrom(c)
+    local white = Color3.new(1,1,1)
+    local black = Color3.new(0,0,0)
+    local txt = colorSeq({0, c:Lerp(white, .5)}, {0.4, c:Lerp(white, .1)}, {1, c:Lerp(black, .25)})
+    local str = colorSeq({0, c:Lerp(black, .55)}, {0.55, c:Lerp(black, .75)}, {1, c:Lerp(black, .92)})
+    return {Text = txt, Stroke = str, Outline = c:Lerp(white, .25)}
+end
+
+MutPalettes.Golden     = paletteFrom(Color3.fromRGB(255, 205, 60))
+MutPalettes.Silver     = paletteFrom(Color3.fromRGB(210, 220, 235))
+MutPalettes.Sakura     = paletteFrom(Color3.fromRGB(255, 158, 216))
+MutPalettes.GreatBloom = paletteFrom(Color3.fromRGB(124, 255, 196))
+MutPalettes.Boss       = paletteFrom(Color3.fromRGB(255, 122, 122))
+MutPalettes.Monstrous  = paletteFrom(Color3.fromRGB(192, 139, 255))
+MutPalettes.Rainbow    = {
+    Text = colorSeq({0, Color3.fromRGB(255,107,107)}, {0.2, Color3.fromRGB(255,179,107)},
+                    {0.4, Color3.fromRGB(255,240,107)}, {0.6, Color3.fromRGB(107,255,138)},
+                    {0.8, Color3.fromRGB(107,200,255)}, {1, Color3.fromRGB(185,107,255)}),
+    Stroke = colorSeq({0, Color3.fromRGB(20,20,30)}, {1, Color3.fromRGB(8,8,12)}),
+    Outline = Color3.new(1,1,1), Rotation = 0,
+}
+
+local NameGradient = colorSeq(
+    {0, Color3.fromRGB(255,255,255)},
+    {0.5, Color3.fromRGB(222,238,255)},
+    {1, Color3.fromRGB(255,255,255)})
+
+local SecretGradient = colorSeq(
+    {0, Color3.fromRGB(255,255,255)},
+    {0.2, Color3.fromRGB(206,212,224)},
+    {0.42, Color3.fromRGB(74,80,94)},
+    {0.58, Color3.fromRGB(42,46,56)},
+    {0.78, Color3.fromRGB(158,166,182)},
+    {1, Color3.fromRGB(250,252,255)})
+
+local ValueGradient = paletteFrom(Color3.fromRGB(77, 255, 122))
+local InfoGradient  = {
+    Text = NameGradient,
+    Stroke = colorSeq({0, Color3.fromRGB(8,8,8)}, {1, Color3.fromRGB(8,8,8)}),
+    Outline = Color3.new(1,1,1),
+}
+
+local function fmtRate(n)
+    n = tonumber(n) or 0
+    if n >= 1e12 then return string.format("%.2fT/s", n/1e12) end
+    if n >= 1e9  then return string.format("%.2fB/s", n/1e9)  end
+    if n >= 1e6  then return string.format("%.2fM/s", n/1e6)  end
+    if n >= 1e3  then return string.format("%.1fK/s", n/1e3)  end
+    return string.format("%d/s", math.floor(n))
+end
+
+local function fmtNum(n)
+    n = tonumber(n) or 0
+    if n >= 1e12 then return string.format("%.2fT", n/1e12) end
+    if n >= 1e9  then return string.format("%.2fB", n/1e9)  end
+    if n >= 1e6  then return string.format("%.2fM", n/1e6)  end
+    if n >= 1e3  then return string.format("%.1fK", n/1e3)  end
+    return string.format("%d", math.floor(n))
+end
+
+local function fmtWeight(kg)
+    kg = tonumber(kg) or 0
+    local s = kg >= 1000 and string.format("%.0f", kg) or string.format("%.2f", kg)
+    local head, tail = s:match("^(%-?%d+)(%.%d+)$")
+    head = head or s
+    while true do
+        local nxt, n = head:gsub("^(%-?%d+)(%d%d%d)", "%1,%2")
+        if n == 0 then break end
+        head = nxt
+    end
+    return head .. (tail or "") .. " Kg"
+end
+
+local function scaleFactor(s)
+    s = tonumber(s) or 1
+    if s > 5 then return (s/5)^1.2 * 19.637875755794113 end
+    return s^1.85
+end
+
+local function mutMult(muts)
+    if Mutations and type(Mutations.EarningsFor) == "function" then
+        local ok, r = pcall(Mutations.EarningsFor, muts or {})
+        if ok and type(r) == "number" then return r end
+    end
+    return 1
+end
+
+local function mutText(muts)
+    if type(muts) ~= "table" then return "" end
+    local parts = {}
+    for _, m in ipairs(muts) do
+        local up = string.upper(tostring(m))
+        if m == "Rainbow" or m == "Prismatic" then
+            local letters = {}
+            local rc = {Color3.fromRGB(255,107,107), Color3.fromRGB(255,179,107),
+                        Color3.fromRGB(255,240,107), Color3.fromRGB(107,255,138),
+                        Color3.fromRGB(107,200,255), Color3.fromRGB(185,107,255)}
+            for i = 1, #up do
+                local c = rc[(i-1) % #rc + 1]
+                letters[i] = string.format('<font color="#%s">%s</font>', c:ToHex(), up:sub(i,i))
+            end
+            parts[#parts+1] = "<b>" .. table.concat(letters) .. "</b>"
+        else
+            local c = (MutPalettes[m] and MutPalettes[m].Outline) or Color3.fromRGB(143,227,255)
+            parts[#parts+1] = string.format('<b><font color="#%s">%s</font></b>', c:ToHex(), up)
+        end
+    end
+    return table.concat(parts, " ")
+end
+
+local assetCache = {}
+local rarityGradientsFolder
+
+local function getRarityGradient(rarity)
+    if not rarity then return nil end
+    if typeof(rarity.RarityGradient) == "Instance" then return rarity.RarityGradient end
+    if rarityGradientsFolder == nil then
+        local a = RS:FindFirstChild("Assets")
+        a = a and a:FindFirstChild("UI")
+        rarityGradientsFolder = a and a:FindFirstChild("RarityGradients") or false
+    end
+    if not rarityGradientsFolder then return nil end
+    local f = rarityGradientsFolder:FindFirstChild(tostring(rarity._id or rarity.DisplayName or ""))
+    return f and f:FindFirstChild("RarityGradient") or nil
+end
+
+local function assetInfo(cat)
+    cat = tostring(cat)
+    local c = assetCache[cat]
+    if c then return c end
+
+    local dir = Assets and Assets.Directory
+    local info = dir and dir[cat]
+
+    if not info and type(dir) == "table" then
+        local norm = cat:lower():gsub("[^%a%d]", "")
+        for k, v in pairs(dir) do
+            if type(v) == "table" then
+                local keys = {tostring(k), tostring(v._id or ""), tostring(v.DisplayName or "")}
+                if type(v.Egg) == "table" then
+                    keys[#keys+1] = tostring(v.Egg.ModelName or "")
+                end
+                for _, s in ipairs(keys) do
+                    if s ~= "" and s:lower():gsub("[^%a%d]", "") == norm then
+                        info = v
+                        break
+                    end
+                end
+                if info then break end
+            end
+        end
+    end
+
+    local rarity = type(info) == "table" and type(info.Rarity) == "table" and info.Rarity or nil
+    local rname  = rarity and tostring(rarity.DisplayName or rarity._id or "Common") or "Common"
+    local rnum   = rarity and tonumber(rarity.RarityNumber or rarity.Rank) or 0
+    local color  = rarity and typeof(rarity.Color) == "Color3" and rarity.Color or Color3.new(1,1,1)
+
+    local pal = paletteFrom(color)
+    local grad = getRarityGradient(rarity)
+    if grad and grad:IsA("UIGradient") then
+        pal.Text = grad.Color
+        pal.Rotation = grad.Rotation
+    end
+
+    local rpal = pal
+    if isSecret(rname) then
+        rpal = {Text = SecretGradient, Stroke = pal.Stroke, Outline = pal.Outline, Rotation = 90}
+    end
+
+    local icon = type(info) == "table" and info.Icon or nil
+    if tonumber(icon) then icon = "rbxassetid://" .. tostring(icon) end
+
+    local data = {
+        Name = type(info) == "table" and tostring(info.DisplayName or cat) or cat,
+        Category = cat,
+        Rarity = rname, RarityNumber = rnum,
+        Color = color,
+        Palette = pal, RarityPalette = rpal,
+        EarningRate = type(info) == "table" and tonumber(info.EarningRate) or 0,
+        Icon = icon,
+    }
+    assetCache[cat] = data
+    return data
+end
+
+local function eggIncome(info, scale, muts)
+    if info.EarningRate <= 0 or not scale or scale <= 0 then return 0 end
+    return math.max(math.round(info.EarningRate * scaleFactor(scale) * mutMult(muts)), 1)
+end
+
+local Cfg = {
+    Eggs = false, EggsMinRarity = 5, EggsMinValue = 0, EggsOwnBase = true,
+    EggsFixed = false, EggsSizeScale = 0.75,
+    EggsInfo = {Icon=true, Name=true, Rarity=false, Mutation=true, Value=true,
+                Weight=false, Size=false, ["Sell Price"]=false,
+                Distance=false, Area=false, State=false},
+}
+
+local function newRuntime()
+    local sg = Instance.new("ScreenGui")
+    sg.Name = rid()
+    sg.Archivable = false
+    sg.ResetOnSpawn = false
+    sg.IgnoreGuiInset = true
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    sg.DisplayOrder = 48
+    sg.Parent = HUI
+    return sg
+end
+
+local function makeTag(adornee, maxDist)
+    local bb = Instance.new("BillboardGui")
+    bb.Name = rid()
+    bb.AlwaysOnTop = true
+    bb.LightInfluence = 0
+    bb.MaxDistance = maxDist or math.huge
+    bb.Adornee = adornee
+
+    local frame = Instance.new("Frame")
+    frame.Name = rid()
+    frame.BackgroundTransparency = 1
+    frame.BorderSizePixel = 0
+    frame.Size = UDim2.fromScale(1, 1)
+    frame.Parent = bb
+
+    local lay = Instance.new("UIListLayout")
+    lay.Name = rid()
+    lay.FillDirection = Enum.FillDirection.Vertical
+    lay.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    lay.VerticalAlignment = Enum.VerticalAlignment.Center
+    lay.SortOrder = Enum.SortOrder.LayoutOrder
+    lay.Parent = frame
+
+    bb.Parent = HUI
+    return bb, frame
+end
+
+local function makeTextRow(parent, font, order, hScale)
+    local f = Instance.new("Frame")
+    f.Name = rid()
+    f.BackgroundTransparency = 1
+    f.BorderSizePixel = 0
+    f.Size = UDim2.fromScale(1, hScale)
+    f.LayoutOrder = order
+    f.Parent = parent
+
+    local function mkLabel(z)
+        local t = Instance.new("TextLabel")
+        t.Name = rid()
+        t.BackgroundTransparency = 1
+        t.Size = UDim2.fromScale(1, 1)
+        t.TextScaled = true
+        t.TextStrokeTransparency = 1
+        t.TextXAlignment = Enum.TextXAlignment.Center
+        t.TextYAlignment = Enum.TextYAlignment.Center
+        t.ZIndex = z
+        t.Font = font or Enum.Font.GothamBold
+        t.Text = ""
+        t.Parent = f
+        return t
+    end
+
+    local shadow = mkLabel(2)
+    shadow.Position = UDim2.fromOffset(1, 1)
+    shadow.TextColor3 = Color3.new(0,0,0)
+    shadow.TextTransparency = 0.1
+
+    local lbl = mkLabel(3)
+    lbl.TextColor3 = Color3.new(1,1,1)
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Name = rid()
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+    stroke.LineJoinMode = Enum.LineJoinMode.Round
+    stroke.Color = Color3.new(1,1,1)
+    stroke.Transparency = 0.05
+    pcall(function() stroke.StrokeSizingMode = Enum.StrokeSizingMode.ScaledSize end)
+    stroke.Thickness = 0.05
+    stroke.Parent = lbl
+
+    local sg = Instance.new("UIGradient")
+    sg.Name = rid(); sg.Rotation = 90; sg.Parent = stroke
+
+    local tg = Instance.new("UIGradient")
+    tg.Name = rid(); tg.Rotation = 90; tg.Parent = lbl
+
+    return {
+        Holder = f, Shadow = shadow, Label = lbl,
+        StrokeGradient = sg, TextGradient = tg, Palette = nil,
+    }
+end
+
+local function setRow(row, text, palette)
+    if row.Label.Text ~= text then
+        row.Label.Text = text
+        row.Shadow.Text = text
+    end
+    if row.Palette ~= palette then
+        row.Palette = palette
+        row.TextGradient.Color = palette.Text
+        row.TextGradient.Rotation = palette.Rotation or 90
+        row.StrokeGradient.Color = palette.Stroke
+    end
+end
+
+-- ---------------- ESP EGGS ----------------
+local EggRuntime = newRuntime()
+EggRuntime.Enabled = false
+local EggTags = {}
+
+local function sizeEggTag(t)
+    local rows = {
+        {t.IconHolder,        3.2, t.ShowIcon},
+        {t.NameRow.Holder,    1.35, t.ShowName},
+        {t.RarityRow.Holder,  1.2, t.ShowRarity},
+        {t.MutationRow.Holder,1.0, t.ShowMutation},
+        {t.ValueRow.Holder,   1.1, t.ShowValue},
+        {t.ExtraRow.Holder,   1.0, t.ShowExtra},
+    }
+    local total = 0
+    for _, r in ipairs(rows) do
+        if r[3] then total = total + r[2] end
+    end
+    total = math.max(total, 1)
+    for _, r in ipairs(rows) do
+        r[1].Visible = r[3]
+        r[1].Size = UDim2.fromScale(1, r[3] and (r[2]/total) or 0)
+    end
+    local h = math.max(1, math.floor(18 * (Cfg.EggsSizeScale or 0.75) * total))
+    local w = math.max(30, math.floor(150 * (Cfg.EggsSizeScale or 0.75)))
+    if t.Width ~= w or t.Height ~= h or t.Fixed ~= Cfg.EggsFixed then
+        t.Width, t.Height, t.Fixed = w, h, Cfg.EggsFixed
+        if Cfg.EggsFixed then
+            local sc = Cfg.EggsSizeScale or 0.75
+            t.Billboard.Size = UDim2.fromScale(4.5 * sc, 4.5 * sc * (h / w))
+        else
+            t.Billboard.Size = UDim2.fromOffset(w, h)
+        end
+    end
+end
+
+local function clearEgg(uid)
+    local t = EggTags[uid]
+    if t then
+        t.Billboard:Destroy()
+        EggTags[uid] = nil
+    end
+end
+
+local function clearAllEggs()
+    for u in pairs(EggTags) do clearEgg(u) end
+end
+
+local function renderEgg(uid, rec)
+    local info = assetInfo(rec.AssetCategory)
+    local scale = tonumber(rec.AssetScale) or 1
+    local muts = type(rec.Mutations) == "table" and rec.Mutations or {}
+    local baseMut = rec.BaseMutation or muts[1]
+    local value = eggIncome(info, scale, muts)
+
+    local t = EggTags[uid]
+    if not t then
+        local bb, frame = makeTag(workspace.Terrain, math.huge)
+
+        local iconHolder = Instance.new("Frame")
+        iconHolder.Name = rid()
+        iconHolder.BackgroundTransparency = 1
+        iconHolder.Size = UDim2.fromScale(1, 0.2)
+        iconHolder.LayoutOrder = 0
+        iconHolder.Parent = frame
+
+        local img = Instance.new("ImageLabel")
+        img.Name = rid()
+        img.AnchorPoint = Vector2.new(0.5, 1)
+        img.BackgroundTransparency = 1
+        img.Position = UDim2.fromScale(0.5, 1)
+        img.Size = UDim2.fromScale(1, 1)
+        img.ScaleType = Enum.ScaleType.Fit
+        img.Parent = iconHolder
+
+        local ratio = Instance.new("UIAspectRatioConstraint")
+        ratio.AspectRatio = 1
+        ratio.DominantAxis = Enum.DominantAxis.Height
+        ratio.Parent = img
+
+        t = {
+            Billboard = bb,
+            IconHolder = iconHolder, Icon = img,
+            NameRow     = makeTextRow(frame, Enum.Font.GothamBold, 1, 0.25),
+            RarityRow   = makeTextRow(frame, Enum.Font.FredokaOne, 2, 0.2),
+            MutationRow = makeTextRow(frame, Enum.Font.GothamBold, 3, 0.2),
+            ValueRow    = makeTextRow(frame, Enum.Font.GothamBold, 4, 0.2),
+            ExtraRow    = makeTextRow(frame, Enum.Font.GothamBold, 5, 0.2),
+            ShowIcon=false, ShowName=false, ShowRarity=false,
+            ShowMutation=false, ShowValue=false, ShowExtra=false,
+        }
+        EggTags[uid] = t
+    end
+
+    if typeof(rec.BottomCFrame) == "CFrame" then
+        local terrain = workspace.Terrain
+        t.Billboard.Adornee = terrain
+        t.Billboard.StudsOffsetWorldSpace =
+            rec.BottomCFrame.Position - terrain.Position + Vector3.new(0, 4, 0)
+    end
+
+    local info_ = Cfg.EggsInfo
+    local baseMutStr = type(baseMut) == "string" and baseMut ~= "" and baseMut or nil
+
+    local showIcon = info_.Icon and info.Icon ~= nil
+    if showIcon then t.Icon.Image = info.Icon end
+
+    local showName = info_.Name and true
+    if showName then setRow(t.NameRow, info.Name, InfoGradient) end
+
+    local showRarity = info_.Rarity and info.Rarity ~= ""
+    if showRarity then
+        setRow(t.RarityRow, string.upper(info.Rarity), info.RarityPalette)
+    end
+
+    local showMut = info_.Mutation and baseMutStr ~= nil
+    if showMut then
+        setRow(t.MutationRow, mutText({baseMutStr}),
+               MutPalettes[baseMutStr] or InfoGradient)
+    end
+
+    local showValue = info_.Value and true
+    if showValue then setRow(t.ValueRow, "$" .. fmtRate(value), ValueGradient) end
+
+    local extras = {}
+    if info_.Weight and EggRecords and EggRecords.WeightKgForScale then
+        local ok, w = pcall(EggRecords.WeightKgForScale, rec.AssetCategory, scale)
+        if ok and tonumber(w) then extras[#extras+1] = fmtWeight(w) end
+    end
+    if info_.Size then extras[#extras+1] = string.format("x%.2f", scale) end
+    if info_["Sell Price"] and EggRecords and EggRecords.SellPrice then
+        local ok, sp = pcall(EggRecords.SellPrice, rec)
+        if ok and tonumber(sp) then extras[#extras+1] = "$" .. fmtNum(sp) end
+    end
+    if info_.Distance and typeof(rec.BottomCFrame) == "CFrame" then
+        local ch = LP.Character
+        local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            extras[#extras+1] = string.format("%dm",
+                math.floor((hrp.Position - rec.BottomCFrame.Position).Magnitude + 0.5))
+        end
+    end
+    if info_.Area and rec.AreaId then extras[#extras+1] = tostring(rec.AreaId) end
+    if info_.State and rec.State and rec.State ~= "Slot" then
+        extras[#extras+1] = tostring(rec.State)
+    end
+
+    local showExtra = #extras > 0
+    if showExtra then
+        setRow(t.ExtraRow, table.concat(extras, "  |  "), InfoGradient)
+    end
+
+    if t.ShowIcon ~= showIcon or t.ShowName ~= showName
+       or t.ShowRarity ~= showRarity or t.ShowMutation ~= showMut
+       or t.ShowValue ~= showValue or t.ShowExtra ~= showExtra
+       or t.Scale ~= Cfg.EggsSizeScale then
+        t.ShowIcon, t.ShowName, t.ShowRarity =
+            showIcon, showName, showRarity
+        t.ShowMutation, t.ShowValue, t.ShowExtra =
+            showMut, showValue, showExtra
+        t.Scale = Cfg.EggsSizeScale
+        sizeEggTag(t)
+    end
+end
+
+local function refreshEggs()
+    if not Cfg.Eggs then clearAllEggs(); return end
+    local seen = {}
+
+    if EggState and EggState.ReadFieldEggs then
+        local ok, snap = pcall(EggState.ReadFieldEggs)
+        if ok and type(snap) == "table" and type(snap.Records) == "table" then
+            for uid, rec in pairs(snap.Records) do
+                if type(rec) == "table" and rec.State ~= "Claimed"
+                   and typeof(rec.BottomCFrame) == "CFrame" then
+                    local info = assetInfo(rec.AssetCategory)
+                    if info.RarityNumber >= Cfg.EggsMinRarity then
+                        if eggIncome(info, rec.AssetScale, rec.Mutations) >= Cfg.EggsMinValue then
+                            seen[uid] = true
+                            renderEgg(uid, rec)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if Cfg.EggsOwnBase and EggState and EggState.ReadOwnerEggs then
+        local ok, recs = pcall(EggState.ReadOwnerEggs, LP.UserId)
+        if ok and type(recs) == "table" then
+            local renders = workspace:FindFirstChild("PlacedEggRenders")
+            for uid, rec in pairs(recs) do
+                if type(rec) == "table" and rec.Placement ~= nil
+                   and type(rec.AssetCategory) == "string" then
+                    local info = assetInfo(rec.AssetCategory)
+                    if info.RarityNumber >= Cfg.EggsMinRarity then
+                        if eggIncome(info, rec.AssetScale, rec.Mutations) >= Cfg.EggsMinValue then
+                            local cf
+                            if renders then
+                                for _, c in ipairs(renders:GetChildren()) do
+                                    if string.find(c.Name, tostring(uid), 1, true) then
+                                        cf = c:IsA("Model") and c:GetPivot() or c.CFrame
+                                        break
+                                    end
+                                end
+                            end
+                            if cf then
+                                local key = "base:" .. tostring(uid)
+                                seen[key] = true
+                                renderEgg(key, {
+                                    AssetCategory = rec.AssetCategory,
+                                    AssetScale = rec.AssetScale,
+                                    Mutations = rec.Mutations,
+                                    BaseMutation = rec.BaseMutation,
+                                    State = "Base", AreaId = "Your Base",
+                                    BottomCFrame = cf, Model = nil,
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    for u in pairs(EggTags) do
+        if not seen[u] then clearEgg(u) end
+    end
+end
+
+-- ---------------- LOOP ----------------
+local accEgg = 0
+RunService.Heartbeat:Connect(function(dt)
+    accEgg = accEgg + dt
+    if accEgg >= 1.0 then
+        accEgg = 0
+        pcall(refreshEggs)
+    end
+end)
+
+-- ---------------- GUI ----------------
+local gui = Instance.new("ScreenGui")
+gui.Name = rid()
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 42
+gui.Parent = HUI
+
+-- Botão flutuante "K" (aparece quando minimizado)
+local FloatBtn = Instance.new("TextButton")
+FloatBtn.Name = rid()
+FloatBtn.Size = UDim2.fromOffset(50, 50)
+FloatBtn.Position = UDim2.new(0, 20, 0, 20)
+FloatBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+FloatBtn.BorderSizePixel = 0
+FloatBtn.Text = "K"
+FloatBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+FloatBtn.Font = Enum.Font.GothamBlack
+FloatBtn.TextSize = 22
+FloatBtn.AutoButtonColor = false
+FloatBtn.Active = true
+FloatBtn.Draggable = true
+FloatBtn.Visible = false
+FloatBtn.Parent = gui
+local fbc = Instance.new("UICorner")
+fbc.CornerRadius = UDim.new(1, 0)
+fbc.Parent = FloatBtn
+local fbs = Instance.new("UIStroke")
+fbs.Color = Color3.fromRGB(255, 255, 255)
+fbs.Thickness = 2
+fbs.Transparency = 0.5
+fbs.Parent = FloatBtn
+
+-- Painel principal
+local main = Instance.new("Frame")
+main.Size = UDim2.fromOffset(260, 360)
+main.Position = UDim2.new(0, 20, 0, 80)
+main.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+main.BorderSizePixel = 0
+main.Active = true
+main.Draggable = true
+main.Parent = gui
+local mc = Instance.new("UICorner")
+mc.CornerRadius = UDim.new(0, 10)
+mc.Parent = main
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 30)
+title.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+title.BorderSizePixel = 0
+title.Text = "ESP EGGS"
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.Parent = main
+local tc = Instance.new("UICorner")
+tc.CornerRadius = UDim.new(0, 10)
+tc.Parent = title
+
+-- Botão minimizar dentro do header
+local MinBtn = Instance.new("TextButton")
+MinBtn.Name = rid()
+MinBtn.Size = UDim2.fromOffset(24, 24)
+MinBtn.Position = UDim2.new(1, -30, 0, 3)
+MinBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+MinBtn.BorderSizePixel = 0
+MinBtn.Text = "—"
+MinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinBtn.Font = Enum.Font.GothamBold
+MinBtn.TextSize = 14
+MinBtn.AutoButtonColor = false
+MinBtn.ZIndex = 2
+MinBtn.Parent = title
+local mbc = Instance.new("UICorner")
+mbc.CornerRadius = UDim.new(0, 6)
+mbc.Parent = MinBtn
+
+-- Lógica minimizar/mostrar
+MinBtn.MouseButton1Click:Connect(function()
+    main.Visible = false
+    FloatBtn.Visible = true
+end)
+FloatBtn.MouseButton1Click:Connect(function()
+    main.Visible = true
+    FloatBtn.Visible = false
+end)
+
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, 0, 1, -30)
+scroll.Position = UDim2.new(0, 0, 0, 30)
+scroll.BackgroundTransparency = 1
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 4
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.Parent = main
+
+local list = Instance.new("UIListLayout")
+list.Padding = UDim.new(0, 6)
+list.SortOrder = Enum.SortOrder.LayoutOrder
+list.Parent = scroll
+
+local pad = Instance.new("UIPadding")
+pad.PaddingTop = UDim.new(0, 6)
+pad.PaddingBottom = UDim.new(0, 6)
+pad.PaddingLeft = UDim.new(0, 8)
+pad.PaddingRight = UDim.new(0, 8)
+pad.Parent = scroll
+
+local order = 0
+local function newOrder()
+    order = order + 1
+    return order
+end
+
+local function mkLabel(text)
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1, 0, 0, 20)
+    t.BackgroundTransparency = 1
+    t.Text = text
+    t.TextColor3 = Color3.fromRGB(180, 180, 200)
+    t.Font = Enum.Font.GothamBold
+    t.TextSize = 11
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    t.LayoutOrder = newOrder()
+    t.Parent = scroll
+    return t
+end
+
+local function mkToggle(text, def, cb)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, 0, 0, 26)
+    b.BackgroundColor3 = def and Color3.fromRGB(60, 180, 90) or Color3.fromRGB(40, 40, 48)
+    b.BorderSizePixel = 0
+    b.Text = text
+    b.TextColor3 = Color3.new(1,1,1)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 12
+    b.LayoutOrder = newOrder()
+    b.Parent = scroll
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = b
+
+    local on = def
+    b.MouseButton1Click:Connect(function()
+        on = not on
+        b.BackgroundColor3 = on and Color3.fromRGB(60, 180, 90) or Color3.fromRGB(40, 40, 48)
+        if cb then cb(on) end
+    end)
+    return b
+end
+
+local function mkSlider(text, min, max, def, cb)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.new(1, 0, 0, 40)
+    holder.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    holder.BorderSizePixel = 0
+    holder.LayoutOrder = newOrder()
+    holder.Parent = scroll
+    local hc = Instance.new("UICorner")
+    hc.CornerRadius = UDim.new(0, 6)
+    hc.Parent = holder
+
+    local lbl = Instance.new("TextLabel")
+    lbl.BackgroundTransparency = 1
+    lbl.Position = UDim2.new(0, 6, 0, 2)
+    lbl.Size = UDim2.new(1, -12, 0, 16)
+    lbl.Text = text .. ": " .. tostring(def)
+    lbl.TextColor3 = Color3.new(1,1,1)
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 11
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = holder
+
+    local bar = Instance.new("Frame")
+    bar.Position = UDim2.new(0, 6, 0, 24)
+    bar.Size = UDim2.new(1, -12, 0, 6)
+    bar.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    bar.BorderSizePixel = 0
+    bar.Parent = holder
+    local bc = Instance.new("UICorner")
+    bc.CornerRadius = UDim.new(1, 0)
+    bc.Parent = bar
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new((def - min)/(max - min), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(60, 180, 90)
+    fill.BorderSizePixel = 0
+    fill.Parent = bar
+    local fc = Instance.new("UICorner")
+    fc.CornerRadius = UDim.new(1, 0)
+    fc.Parent = fill
+
+    local dragging = false
+    local function setVal(x)
+        local rel = math.clamp((x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        local val = min + (max - min) * rel
+        fill.Size = UDim2.new(rel, 0, 1, 0)
+        lbl.Text = text .. ": " .. string.format("%.2f", val)
+        if cb then cb(val) end
+    end
+    bar.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+           or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            setVal(i.Position.X)
+        end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement
+           or i.UserInputType == Enum.UserInputType.Touch) then
+            setVal(i.Position.X)
+        end
+    end)
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+           or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    return holder
+end
+
+local function mkMulti(text, options, defaults, cb)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.new(1, 0, 0, #options * 20 + 20)
+    holder.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    holder.BorderSizePixel = 0
+    holder.LayoutOrder = newOrder()
+    holder.Parent = scroll
+    local hc = Instance.new("UICorner")
+    hc.CornerRadius = UDim.new(0, 6)
+    hc.Parent = holder
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -8, 0, 18)
+    lbl.Position = UDim2.new(0, 4, 0, 2)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = Color3.fromRGB(180, 180, 200)
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 11
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = holder
+
+    local state = {}
+    for _, d in ipairs(defaults or {}) do state[d] = true end
+
+    for i, opt in ipairs(options) do
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, -8, 0, 18)
+        b.Position = UDim2.new(0, 4, 0, 20 + (i-1)*20)
+        b.BackgroundColor3 = state[opt] and Color3.fromRGB(60,180,90) or Color3.fromRGB(40,40,48)
+        b.Text = "  " .. opt
+        b.TextColor3 = Color3.new(1,1,1)
+        b.Font = Enum.Font.Gotham
+        b.TextSize = 10
+        b.TextXAlignment = Enum.TextXAlignment.Left
+        b.Parent = holder
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 4)
+        c.Parent = b
+
+        b.MouseButton1Click:Connect(function()
+            state[opt] = not state[opt]
+            b.BackgroundColor3 = state[opt] and Color3.fromRGB(60,180,90) or Color3.fromRGB(40,40,48)
+            if cb then cb(state) end
+        end)
+    end
+    return holder
+end
+
+mkLabel("EGGS")
+mkToggle("ESP Eggs", false, function(v)
+    Cfg.Eggs = v
+    EggRuntime.Enabled = v
+    if not v then clearAllEggs() end
+end)
+mkMulti("Egg Info",
+    {"Icon","Name","Rarity","Mutation","Value","Weight","Size",
+     "Sell Price","Distance","Area","State"},
+    {"Icon","Name","Mutation","Value"},
+    function(state) Cfg.EggsInfo = state end)
+mkSlider("Min Rarity", 0, 15, 5,
+    function(v) Cfg.EggsMinRarity = math.floor(v) end)
+mkSlider("Min Value (K/s)", 0, 500, 0,
+    function(v) Cfg.EggsMinValue = v * 1000 end)
+mkSlider("Egg Size", 50, 200, 75,
+    function(v) Cfg.EggsSizeScale = v / 100 end)
+mkToggle("Fixed Size", false, function(v) Cfg.EggsFixed = v end)
+mkToggle("Own Base Eggs", true, function(v) Cfg.EggsOwnBase = v end)
+
+print("[ESP Eggs] Carregado")
