@@ -1,6 +1,4 @@
--- ================================================================
--- ESP EGGS Standalone + Botão K
--- ================================================================
+
 local Players    = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local RS         = game:GetService("ReplicatedStorage")
@@ -354,7 +352,7 @@ local function setRow(row, text, palette)
     end
 end
 
--- ---------------- ESP EGGS ----------------
+
 local EggRuntime = newRuntime()
 EggRuntime.Enabled = false
 local EggTags = {}
@@ -584,7 +582,7 @@ local function refreshEggs()
     end
 end
 
--- ---------------- LOOP ----------------
+
 local accEgg = 0
 RunService.Heartbeat:Connect(function(dt)
     accEgg = accEgg + dt
@@ -594,7 +592,7 @@ RunService.Heartbeat:Connect(function(dt)
     end
 end)
 
--- ---------------- GUI ----------------
+
 local gui = Instance.new("ScreenGui")
 gui.Name = rid()
 gui.ResetOnSpawn = false
@@ -602,7 +600,7 @@ gui.IgnoreGuiInset = true
 gui.DisplayOrder = 42
 gui.Parent = HUI
 
--- Botão flutuante "K" (aparece quando minimizado)
+
 local FloatBtn = Instance.new("TextButton")
 FloatBtn.Name = rid()
 FloatBtn.Size = UDim2.fromOffset(50, 50)
@@ -627,7 +625,7 @@ fbs.Thickness = 2
 fbs.Transparency = 0.5
 fbs.Parent = FloatBtn
 
--- Painel principal
+
 local main = Instance.new("Frame")
 main.Size = UDim2.fromOffset(260, 360)
 main.Position = UDim2.new(0, 20, 0, 80)
@@ -653,7 +651,7 @@ local tc = Instance.new("UICorner")
 tc.CornerRadius = UDim.new(0, 10)
 tc.Parent = title
 
--- Botão minimizar dentro do header
+
 local MinBtn = Instance.new("TextButton")
 MinBtn.Name = rid()
 MinBtn.Size = UDim2.fromOffset(24, 24)
@@ -671,7 +669,7 @@ local mbc = Instance.new("UICorner")
 mbc.CornerRadius = UDim.new(0, 6)
 mbc.Parent = MinBtn
 
--- Lógica minimizar/mostrar
+
 MinBtn.MouseButton1Click:Connect(function()
     main.Visible = false
     FloatBtn.Visible = true
@@ -886,5 +884,3 @@ mkSlider("Egg Size", 50, 200, 75,
     function(v) Cfg.EggsSizeScale = v / 100 end)
 mkToggle("Fixed Size", false, function(v) Cfg.EggsFixed = v end)
 mkToggle("Own Base Eggs", true, function(v) Cfg.EggsOwnBase = v end)
-
-print("[ESP Eggs] Carregado")
